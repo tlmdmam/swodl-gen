@@ -1,0 +1,1111 @@
+﻿//
+// Copyright 2017 by Avid Technology, Inc.
+//
+
+//#ifdef IGNORE
+const WORKFLOWNAME = "TLMD_PAM2MAM_CreateOrUpdateDMObject"; 
+const VERSION = "2.8.4";
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Short Description: Creates the DM object at which the imported clip will be attached in the MAM
+//
+// type of workflow: process script
+// started by: StateMachineWS
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// History (newest entries are on top):
+// 
+// V2.8.4 2017-12-19 jrodri     changed promoID to matID and commented out all testing object classes. Made Promo active object class.
+// V2.8.3 2017-12-13 jrodri	Added AXF and Promo ID update based on PROMO and Template for other Object Class
+// V2.8.2 2017-12-12 jrodri	Added PROMO ID and PROMO_VIDEO Object class (object classed renamed to PROMO)
+// V2.8.1 2017-03-07 crosiak	MAM-10527: Change error message output mapping from _ErrorMessage to out_errorMessage
+// V2.8.0 2017-01-10 mwerneru	MAM-10046: Support for multiple PAMAdapter instances
+// V2.7.2 2016-11-08 nludwig	MAM-8946: Filled the new metadata attributes PAM_ORIGINAL_SYSTEM_ID, PAM_ORIGINAL_LOCATION_PATH and PAM_ORIGINAL_STORAGE_PATH in created object
+// V2.7.1 2016-08-10 crosiak	MAM-7786: Added missing XML encoding during AXF string concatenation
+// V2.7.0 2016-07-20 crosiak	MAM-7524: Added support for "archived sequences"
+// V2.6.1 2016-06-23 mwerneru	MAM-6556: Removed unused gosub routines
+// V2.6.0 2015-02-11 crosiak	MAM-5633 - Support for archiving subclips with media (standalone object)
+// V2.5.1 2015-11-25 crosiak	MAM-4863: The object class from the configuration is ignored in case of an object update
+// V2.5.0 2015-11-04 crosiak	MAM-4381: AAF of master clip is saved as collateral on the MAIN essence package of the MAM object 
+// 								Removed cleanup of mixdown as we still need it in the SetMetadata script
+//								Cleanup workflow will cover also the cleanup of the mixdown
+// V2.4.1 2015-06-19 mwerneru 	MAM-2235: Changed REGEX in const SRV_UNAVAILABLE_EXCEPTION to consider SQL server exceptions related to connection issues
+// V2.4.0 2015-04-21 mwerneru	MAM-1766: information about exported video/audio resolutions is saved for the DM object 
+// V2.3.8 2015-03-10 mwerneru 	MAM-1751 Changed REGEX in const SRV_UNAVAILABLE_EXCEPTION to consider IIS pool shutdown
+// V2.3.7 2015-01-08 mwerneru	Cleanup of unnecessry handling of attribute P_IDENTIFIER_SOURCE_ATTRIBUTE
+// V2.3.6 2014-05-20 mwerneru	US #77689: Set _UserGuid to PAM asset name
+// V2.3.5 2014-05-19 mwerneru	Bug #76350: In case of an import in "update mode", the MAINTITLE is not updated with the asset title
+// V2.3.4 2014-05-19 mwerneru	Bug #61455 / US #77689: Removed the sub routine 'UpdateWSProgressSub', which updated the wf status with a progress value and message.
+// V2.3.3 2014-05-14 mwerneru	Removed unused block for deleting PAM files.  
+// V2.3.2 2014-05-14 mwerneru	Replacement of GetAttributes with GetAttribute method (take over TFS changeset 102201)
+// V2.3.1 2014-05-14 mwerneru	Problem with multiple mixdown clips which are created for one sequence (take over of TFS changeset 106549)  
+// V2.3.0 2014-04-30 mwerneru	User story #80720: Update of existing objects in the MAM.
+//								Passed MOBID of original asset to be part of newly created object.
+// V2.2.0 2013-12-12 proesch	replaced 5 calls to UpdateDMAttribute by one call to UpdateDMObject ;-) and made sure that mix-down is deleted already in this workflow
+// V2.1.1 2013-12-03 amoritz	iNEWS enhancements, update existing object
+// V2.1.0 2013-09-12 jklingel	added an user exit to identify an object
+// V2.0.3 2013-09-11 jklingel	removed decision if order or process workflow - this is only a process script
+// V2.0.2 2013-08-23 amoritz 	P_IDENTIFIER_SOURCE_ATTRIBUTE added to object creation AXF
+// V2.0.1 2013-08-13 amoritz 	workflow renamed from MPI2MAM_CreateDMObject to PAM2MAM_CreateDMObject
+// V2.0.0 2013-07-25 amoritz 	MPI resync refactoring
+// V1.2.1 2013-06-26 oshevchu	Use P_PROCESS_PROGRESS attribute instead of PROCESS_PROGRESS attribute.
+// V1.2.0 2013-03-18 proesch	merged in changes from MPI 4.2.2
+// V1.1.0 2013-02-04 mwerneru	The newly created object is now attached to the process
+// V1.0.1 2012-10-26 amoritz	sync with new MPI4.2 release
+// V1.0.2 2012-11-23 amoritz	process progress/monitoring
+// V1.0.0 2012-09-21 lene
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Description: (automatically generated from block descriptions - do not edit!)
+// 
+// 1. [[Input parameters]]
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// 2. [[Output parameters]]
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// 3. [[Constants]]
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// 4. [[Check parameters]]
+// Check parameters
+//
+// 5. [[Create DMObject]]
+// Create object in InterplayMAM DataManager.
+//
+// 6. [[Check DMAttributes]]
+// Verify DM Attributes exist in object
+//
+// 7. [[Attach object to process]]
+// Attach object to process
+//
+// 8. [[Cleanup mixdown]]
+// Cleaning up mixdown
+// we need this only in the success case, because otherwise, it will be done in PAM2MAM_Cleanup anyway immediately
+//
+// 9. [[FinishOrder]]
+// Delete temporary files and PAM assets.
+//
+// 10. [[Set processArgs]]
+// Set processArgs
+//
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Input parameters
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+[[Input parameters]]
+
+// standard in parameters:
+
+in _ProcessID;			// The DMGuid of the ProcessObject set by StateMachineWS.
+in _ProcessVersion; 	// The version of the process instance set by StateMachineWS.
+in AccessKey; 			// The accesskey of the session set by StateMachineWS.
+
+// specific in parameters:
+
+in processArgs;					//MPI_WF_PARAMETERS - struct
+
+in in_archiveConfig;			//processArgs.archiveConfig   
+in in_mandatoryMAMAttributes;	//processArgs.mandatoryMAMAttributes
+in in_pamAssetName;				//processArgs.pamAssetName			
+in in_pamAssetType;				//processArgs.pamAssetType			
+in in_pamConfigName;			//processArgs.pamConfigName
+in in_progressOnSuccess;		//constant value
+in in_transferMasterclipURI;	//processArgs.transferMasterclipURI
+in in_transferAudioFormat;		//processArgs.transferAudioFormat
+in in_transferVideoFormat;		//processArgs.transferVideoFormat
+in in_mixdownFailed;			//processArgs.mixdownFailed
+in in_handleAsSequence;			//processArgs.handleAsSequence
+in in_originalAssetUri;			//processArgs.transferOriginalAssetURI
+
+
+// iNEWS parameters
+in in_doUpdate;		// processArgs.doUpdate
+in in_objectDMGUID;	// processArgs.objectDMGUID 
+
+in in_audioTrackCount;
+in in_pamAdapterServiceId;	// processArgs.pamAdapterServiceId
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Output parameters
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+[[Output parameters]]
+
+var _ErrorMessage;
+
+var out_dmGuid = "";
+var out_mandatoryMAMAttributes;
+var out_skipVideoImport;
+var out_errorMessage;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Constants
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+[[Constants]]
+
+const TASK_STATE_PENDING 	= "Pending";
+const TASK_STATE_RUNNING 	= "Running";
+const TASK_STATE_FINISHED	= "Finished"; 
+const TASK_STATE_ERROR 		= "Error";
+const TASK_STATE_TIMEOUT 	= "Timeout";
+
+//TaskLifecycle values(LegalList: P_TASK_LIFECYCLE)
+const TASK_LIFECYCLE_PENDING	= 0;
+const TASK_LIFECYCLE_RUNNING	= 1;	
+const TASK_LIFECYCLE_FINISHED 	= 2;  
+const TASK_LIFECYCLE_ERROR 		= 3;
+const TASK_LIFECYCLE_TIMEOUT	= 4;
+ 
+const TASK_PROGRESS_FINISHED	= "100"; 
+const TASK_PROGRESS_ERROR 		= "-1";
+
+const PROCESS_PROGRESS_ATTRIBUTE = "P_PROCESS_PROGRESS";
+
+const MAINTITLE = "MAINTITLE";
+
+//Mandatory attributes for the created object
+const PAM_MASTERCLIP_SRCID = "PAM_MASTERCLIP_SRCID";
+const PAM_MASTERCLIP_TAPE = "PAM_MASTERCLIP_TAPE";
+const PAM_MASTERCLIP_MOBID = "PAM_MASTERCLIP_MOBID";
+const PAM_SEQUENCE_MOBID = "PAM_SEQUENCE_MOBID";
+const PAM_SOURCEMOB_OFFSET = "PAM_SOURCEMOB_OFFSET";
+const PAM_SOURCEMOB_OFFSET_TYPE = "PAM_SOURCEMOB_OFFSET_TYPE";
+const PAM_ORIGINAL_ASSET_MOBID = "PAM_ORIGINAL_ASSET_MOBID";
+const PAM_ARCHIVED_AUDIO_FORMAT = "PAM_ARCHIVED_AUDIO_FORMAT";
+const PAM_ARCHIVED_VIDEO_FORMAT = "PAM_ARCHIVED_VIDEO_FORMAT";
+const PAM_ARCHIVED_AUDIO_TRACK_COUNT = "PAM_ARCHIVED_AUDIO_TRACK_COUNT";
+const PAM_ORIGINAL_LOCATION_PATH = "PAM_ORIGINAL_LOCATION_PATH";
+const PAM_ORIGINAL_SYSTEM_ID = "PAM_ORIGINAL_SYSTEM_ID";
+const PAM_ORIGINAL_STORAGE_PATH = "PAM_ORIGINAL_STORAGE_PATH";
+
+const INTERPLAY_SCHEME_PREFIX = "interplay://";
+
+const RETRYMAX = 10;
+
+const UNKNOWN_OBJECT    = "UnknownObject";
+const UNKNOWN_ATTRIBUTE = "UnknownAttribute";
+const CBA_ACCESS_DENIED = "CBAAccessDenied";
+
+const SRV_UNAVAILABLE_EXCEPTION = ".*(Service Unavailable|Unable to connect to the remote server|The underlying connection was closed|An existing connection was forcibly closed by the remote host|A severe error occurred on the current command|Cannot open database|A connection was successfully established with the server, but then an error occurred during the pre-login handshake|A transport-level error has occurred when receiving results from the server|A network-related or instance-specific error occurred while establishing a connection to SQL Server|Connection Timeout Expired\\.  The timeout period elapsed while attempting to consume the pre-login handshake acknowledgement|Timeout expired\\.  The timeout period elapsed prior to obtaining a connection from the pool).*";
+
+const PAMADAPTER_OBJECT_NOT_FOUND_ERROR = "(The requested path was not found|The requested object was not found|does not reference a valid folder or asset|does not reference a valid folder)";
+
+//only used for MPI subs
+const TRUE = "true";
+const FALSE = "false";
+
+const PAMADAPTER_ASSETHANDLING_INTERFACE = "/AssetHandling";
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Declarations
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// DataManagerWS: DMObjectAccess
+var DataManagerWS_DMObjectAccess = "DataManagerWS/DMObjectAccess";
+declare void CreateDMObject(axfdoc, accesskey);
+declare void UpdateDMObject(axf, accesskey);
+declare const string GetDMAttribute(dmguid, attribute, accesskey);
+declare const _xml GetDMStrata(mdclass, accesskey);
+declare void MultiValuePrepend(axfdoc, accesskey);
+declare void UpdateDMAttribute(dmguid, attribute, value, accesskey);
+
+//IDGenerator: IDGenerator
+var IDGenerator = "IDGenerator/IDGenerator";
+declare const string createID (idtype, parameter);
+
+//PAMAdapter: AssetHandling
+var PAMAdapterAsset = "";
+declare const string GetAttribute(accesskey, interplayURI, group, name);
+
+// StateMachineWS/StateMachine
+var StateMachineWS_StateMachine = "StateMachineWS/StateMachine";
+declare void UpdateTask(processId, taskJobId, taskState, taskProgress, taskLifecycle, accessKey) @ StateMachineWS_StateMachine;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Standard Workflow Vars
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var _Name;
+var _ExceptionMessage;
+var _ErrorNumber = "0";
+var _SWoDLLineNumber;
+var _JobID;
+var _RunTime;
+var _StartUpTime;
+var _WorkflowStatus;
+var __History;
+var __ErrorHistory;
+var _UserGuid;
+
+var timestamp;
+var success = TRUE;   // state of the workflow
+var workflowHasWarnings = false; // set to true if at least one warning occured
+
+var workflowStatus;
+
+var taskProgress;
+var taskState;
+var taskLifecycle;
+
+var UserAccessKey = AccessKey; // A valid AccessKey for the user who started the workflow, will be overwritten with WorkflowengineWS access key
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Workflow Vars
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+var matID=""; //JR: temporary material id used for any object class 
+var pamAssetVideoOrTapeID;//toDo: to be clarified, no value was set for out-parameter in ReadMetadata
+var parameterErrors = "";
+
+var xpath0 = "";
+var xpath1 = "";
+var xpath2 = "";
+var xpath3 = "";
+var xpath4 = "";
+var xpath5 = "";
+var xpath6 = "";
+var xpath7 = "";
+var xpath8 = "";
+var xpath9 = "";
+var xret0 = "";
+var xret1 = "";
+var xret2 = "";
+var xret3 = "";
+var xret4 = "";
+var xret5 = "";
+var xret6 = "";
+var xret7 = "";
+var xret8 = "";
+var xret9 = "";
+
+var pos;
+
+var axfDoc;
+
+var verifyDMAttributesResult;     
+
+// sub-routines
+var sub_GetAttribute_INTERNAL_AvidAttributesXML = "";
+var sub_GetAttribute_IN_assetUri = "";
+var sub_GetAttribute_IN_attributeName = "";
+var sub_GetAttribute_OUT_attributeValue = "";
+
+var sub_ExtractInterplayUriBase_IN_interplayUri = "";
+var sub_ExtractInterplayUriBase_OUT_interplayUriBase = "";
+var sub_CheckStrata_IN_mdclass = "";
+var sub_CheckStrata_IN_strataList = "";
+var sub_CheckStrata_OUT_result = "";
+var sub_VerifyDMAttribute_IN_dmGuid = "";
+var sub_VerifyDMAttribute_IN_attributeName = "";
+var sub_VerifyDMAttribute_IN_attributeExpectedValue = "";
+var sub_VerifyDMAttribute_OUT_result = "";
+
+var mamObjectClass = processArgs.archiveConfig.metadataMapping.mamObjectClass;
+
+
+//**************************************************************************************
+/// Check parameters
+[[Check parameters]]
+
+// -> is process workflow, set in-parameters from struct
+if("" != _ProcessID)
+{
+	if("" == processArgs)
+	{
+		parameterErrors += "\nprocessArgs";
+	}
+	else
+	{
+		in_archiveConfig 			= processArgs.archiveConfig;   
+		in_mandatoryMAMAttributes	= processArgs.mandatoryMAMAttributes;
+		in_pamAssetName 			= processArgs.pamAssetName;
+		in_pamAssetType 			= processArgs.pamAssetType;
+		in_pamConfigName 			= processArgs.pamConfigName;
+		in_transferMasterclipURI 	= processArgs.transferMasterclipURI;
+		in_transferAudioFormat		= processArgs.transferAudioFormat;
+		in_transferVideoFormat		= processArgs.transferVideoFormat;
+		in_audioTrackCount			= processArgs.audioTrackCount;
+		
+		// iNEWS parameters
+		in_doUpdate 	= processArgs.doUpdate;
+		in_objectDMGUID	= processArgs.objectDMGUID; 
+		
+		in_mixdownFailed = processArgs.mixdownFailed;
+		in_handleAsSequence = processArgs.handleAsSequence;
+		in_originalAssetUri = processArgs.transferOriginalAssetURI;
+		
+		in_pamAdapterServiceId = processArgs.pamAdapterServiceId;
+	}
+}
+
+if("" == in_archiveConfig)
+{
+	parameterErrors += "\nin_archiveConfig";
+}
+if("" == in_mandatoryMAMAttributes)
+{
+	parameterErrors += "\nin_mandatoryMAMAttributes";
+}
+if("" == in_pamAssetName)
+{
+	parameterErrors += "\nin_pamAssetName";
+}
+if("" == in_pamAssetType)
+{
+	parameterErrors += "\nin_pamAssetType";
+}
+if("" == in_pamConfigName)
+{
+	parameterErrors += "\nin_pamConfigName";
+}
+if("" == in_progressOnSuccess)
+{
+	parameterErrors += "\nin_progressOnSuccess";
+}
+if("" == in_originalAssetUri)
+{
+	parameterErrors += "\nin_originalAssetUri";	
+}
+if("" == in_handleAsSequence)
+{
+	parameterErrors += "\nin_handleAsSequence";
+}
+if("" == in_pamAdapterServiceId)
+{
+	parameterErrors += "\nin_pamAdapterServiceId";
+}
+if("" == in_mixdownFailed)
+{
+	in_mixdownFailed = false;
+}
+if(!in_mixdownFailed)
+{
+	if("" == in_transferMasterclipURI)
+	{
+		parameterErrors += "\nin_transferMasterclipURI";
+	}
+	if("" == in_transferAudioFormat)
+	{
+		parameterErrors += "\nin_transferAudioFormat";
+	}
+	if("" == in_transferVideoFormat)
+	{
+		parameterErrors += "\nin_transferVideoFormat";
+	}
+	if("" == in_audioTrackCount)
+	{
+		parameterErrors += "\nin_audioTrackCount";
+	}
+}
+out_skipVideoImport = in_mixdownFailed;
+
+
+if ("" != parameterErrors)
+{
+	_ErrorNumber = _SWoDLLineNumber;
+	_ErrorMessage = "Found mandatory IN parameters which are empty: " + parameterErrors;
+	goto ErrorExit;
+}
+
+_UserGuid = in_pamAssetName;
+PAMAdapterAsset = in_pamAdapterServiceId + PAMADAPTER_ASSETHANDLING_INTERFACE;
+gosub UpdateWFSuccessStatusSub;
+
+//#endif IGNORE
+//#ifdef CREATE_DMOBJECT_SUBWF
+
+//*****************************************************************************
+///Create object in InterplayMAM DataManager. 
+///
+[[Create DMObject]]
+
+if(!in_handleAsSequence)
+{
+	// Save MobID and SourceID from PAM in MAM
+	sub_GetAttribute_IN_assetUri = in_transferMasterclipURI;
+	sub_GetAttribute_IN_attributeName = "Source ID";
+	sub_GetAttribute_IN_attributeGroup = "SYSTEM";
+	gosub GetAttributeSub;
+	if(sub_GetAttribute_OUT_success == FALSE) { goto ErrorExit; }
+	in_mandatoryMAMAttributes.PAM_MASTERCLIP_SRCID = sub_GetAttribute_OUT_attributeValue;
+	
+	sub_GetAttribute_IN_assetUri = in_transferMasterclipURI;
+	sub_GetAttribute_IN_attributeName = "Tape";
+	sub_GetAttribute_IN_attributeGroup = "SYSTEM";
+	gosub GetAttributeSub;
+	if(sub_GetAttribute_OUT_success == FALSE) { goto ErrorExit; }
+	in_mandatoryMAMAttributes.PAM_MASTERCLIP_TAPE = sub_GetAttribute_OUT_attributeValue;
+	
+	sub_GetAttribute_IN_assetUri = in_transferMasterclipURI;
+	sub_GetAttribute_IN_attributeName = "Path";
+	sub_GetAttribute_IN_attributeGroup = "SYSTEM";
+	gosub GetAttributeSub;
+	if(sub_GetAttribute_OUT_success == FALSE) { goto ErrorExit; }
+	in_mandatoryMAMAttributes.PAM_MASTERCLIP_MOBID = substr(sub_GetAttribute_OUT_attributeValue, findreverse(sub_GetAttribute_OUT_attributeValue, "/") + 1);
+}
+
+//interplay://MCC02Workgroup/Catalogs/060a2b340101010501010f1013-000000-2ea4ef7d27e100a5-1b1e00505687-5490
+var pamOriginalLocationPath = "";
+if((int)find(processArgs.pamFolderAssetUri, INTERPLAY_SCHEME_PREFIX) >= 0)
+{
+	var pamLocationPathWorkgroupAndFolder = substr(processArgs.pamFolderAssetUri, length(INTERPLAY_SCHEME_PREFIX), findreverse(processArgs.pamFolderAssetUri, "/") - length(INTERPLAY_SCHEME_PREFIX));
+	pamOriginalLocationPath = substr(pamLocationPathWorkgroupAndFolder, find(pamLocationPathWorkgroupAndFolder, "/"));
+}
+var pamOriginalStoragePath = processArgs.pamOriginalVideoTrackStorageFolder;
+var pamOriginalSystemId = processArgs.pamOriginalSystemId;
+
+//create new Object
+retry(RETRYMAX)
+{
+	_ExceptionMessage = "";
+	
+	out_dmGuid = createID ("DMGuid", "") @IDGenerator;
+	//JR: Generate Promo ID if Object Class is being created for PROMO
+	if (mamObjectClass=="PROMO"){
+				matID = createID("PromoID", "") @IDGenerator;
+			}
+	//JR: Generate Promo ID if Object Class is being created for PROMO_ARCHIVE
+	//if (mamObjectClass=="<OBJECT_CLASS_HERE>"){
+				//matID = createID("<ID_TYPE_HERE>", "") @IDGenerator;
+			//}
+		
+} while (regex_ismatch(_ExceptionMessage, SRV_UNAVAILABLE_EXCEPTION));
+
+if ("" != _ExceptionMessage)
+{
+	_ErrorMessage = "Could not create new ID. _ExceptionMessage=" + _ExceptionMessage;
+	_ErrorNumber = _SWoDLLineNumber;
+	goto ErrorExit;
+}
+
+if (in_pamAssetName == "")
+{
+    in_pamAssetName = "Import from AvidInterplay: Video/Tape ID " + pamAssetVideoOrTapeID;
+}
+
+//User Exit to identify an object
+if(in_handleAsSequence)
+{
+	identify_in_pamUri = in_originalAssetUri;
+}
+else
+{
+	identify_in_pamUri = in_transferMasterclipURI;	
+}
+gosub IdentifyObject;
+
+//In case the dmGuid returned by the custom implementation of IdentifyObject
+//No object was found and we create a new one
+if("" == identify_out_dmGuid && ("" == in_objectDMGUID && "" == in_doUpdate) )
+{
+	axfDoc = "<AXFRoot>";
+	axfDoc += "<MAObject  type=\"default\" mdclass=\"" + mamObjectClass + "\">";
+	axfDoc += "<GUID mdclass=\"\">" + out_dmGuid + "</GUID>"; 
+	axfDoc += "<Meta name=\"" + MAINTITLE + "\" format=\"string\" frate=\"\">" + xmlencode(in_pamAssetName) + "</Meta>";
+	
+	axfDoc += "<Meta name=\"" + PAM_ORIGINAL_SYSTEM_ID + "\" format=\"string\" frate=\"\">" + xmlencode(pamOriginalSystemId) + "</Meta>";
+	axfDoc += "<Meta name=\"" + PAM_ORIGINAL_LOCATION_PATH + "\" format=\"string\" frate=\"\">" + xmlencode(pamOriginalLocationPath) + "</Meta>";
+	axfDoc += "<Meta name=\"" + PAM_ORIGINAL_STORAGE_PATH + "\" format=\"string\" frate=\"\">" + xmlencode(pamOriginalStoragePath) + "</Meta>";
+	
+	// Set some attributes only if its not a "real archived sequence"
+	if(!in_handleAsSequence)
+	{
+		axfDoc += "<Meta name=\"" + PAM_MASTERCLIP_SRCID + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_MASTERCLIP_SRCID) + "</Meta>";
+		axfDoc += "<Meta name=\"" + PAM_MASTERCLIP_TAPE + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_MASTERCLIP_TAPE) + "</Meta>";
+		axfDoc += "<Meta name=\"" + PAM_SOURCEMOB_OFFSET + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_SOURCEMOB_OFFSET_VALUE) + "</Meta>";
+		axfDoc += "<Meta name=\"" + PAM_SOURCEMOB_OFFSET_TYPE + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_SOURCEMOB_OFFSET_TYPE) + "</Meta>";
+	}
+	
+	// Set some attributes only if its not a subclip
+	if (in_pamAssetType != "subclip")
+	{
+		// Set some attributes only if its not a "real archived sequence"
+		if(!in_handleAsSequence)
+		{
+			axfDoc += "<Meta name=\"" + PAM_MASTERCLIP_MOBID + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_MASTERCLIP_MOBID) + "</Meta>";
+			axfDoc += "<Meta name=\"" + PAM_ARCHIVED_AUDIO_FORMAT + "\" format=\"string\" frate=\"\">" + xmlencode(in_transferAudioFormat) + "</Meta>";
+			axfDoc += "<Meta name=\"" + PAM_ARCHIVED_VIDEO_FORMAT + "\" format=\"string\" frate=\"\">" + xmlencode(in_transferVideoFormat) + "</Meta>";
+			axfDoc += "<Meta name=\"" + PAM_ARCHIVED_AUDIO_TRACK_COUNT + "\" format=\"string\" frate=\"\">" + xmlencode(in_audioTrackCount) + "</Meta>";
+			axfDoc += "<Meta name=\"" + PAM_ORIGINAL_ASSET_MOBID + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_ORIGINAL_ASSET_MOBID) + "</Meta>";
+		}
+		else
+		{
+			axfDoc += "<Meta name=\"" + PAM_SEQUENCE_MOBID + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_ORIGINAL_ASSET_MOBID) + "</Meta>";
+		}
+	}
+	if (mamObjectClass=="PROMO"){
+		axfDoc += "<Meta name=\"TLMD_PROMO_ID\" format=\"string\" frate=\"\">" +matID+ "</Meta>";  //JR: Update AXF Doc with Promo ID 
+	}
+	//if (mamObjectClass=="<OBJECT_CLASS_HERE>"){
+		//axfDoc += "<Meta name=\"TLMD_PROMO_ID\" format=\"string\" frate=\"\">" +matID+ "</Meta>";  //JR: Update AXF Doc with Promo ID 
+	//}
+
+	axfDoc += "</MAObject>";
+	axfDoc += "</AXFRoot>";
+
+
+	retry(RETRYMAX)
+	{
+		_ExceptionMessage = "";
+		
+		CreateDMObject(axfDoc,UserAccessKey) @ DataManagerWS_DMObjectAccess;  
+		
+	} while (regex_ismatch(_ExceptionMessage, SRV_UNAVAILABLE_EXCEPTION));
+	
+	if ("" != _ExceptionMessage)
+	{
+		_ErrorMessage = "Could not create new DM object. _ExceptionMessage=" + _ExceptionMessage;
+		_ErrorNumber = _SWoDLLineNumber;
+		goto ErrorExit;
+	}
+
+	gosub UpdateWFSuccessStatusSub;	
+}
+else
+{
+	
+	if("" != in_objectDMGUID && "1" == in_doUpdate)
+	{
+		out_dmGuid = in_objectDMGUID;
+		mamObjectClass = "";
+	}
+	else if("" != identify_out_dmGuid)
+	{
+		out_dmGuid = identify_out_dmGuid;
+		mamObjectClass = "";
+	}
+	
+	
+	
+	axfDoc = "<AXFRoot>";
+	axfDoc += "<MAObject  type=\"default\" mdclass=\"" + mamObjectClass + "\">";
+	axfDoc += "<GUID mdclass=\"\">" + out_dmGuid + "</GUID>";
+	
+	axfDoc += "<Meta name=\"" + PAM_ORIGINAL_SYSTEM_ID + "\" format=\"string\" frate=\"\">" + xmlencode(pamOriginalSystemId) + "</Meta>";
+	axfDoc += "<Meta name=\"" + PAM_ORIGINAL_LOCATION_PATH + "\" format=\"string\" frate=\"\">" + xmlencode(pamOriginalLocationPath) + "</Meta>";
+	axfDoc += "<Meta name=\"" + PAM_ORIGINAL_STORAGE_PATH + "\" format=\"string\" frate=\"\">" + xmlencode(pamOriginalStoragePath) + "</Meta>";
+	
+	// Set some attributes only if its not a "real archived sequence"
+	if(!in_handleAsSequence)
+	{
+		axfDoc += "<Meta name=\"" + PAM_MASTERCLIP_SRCID + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_MASTERCLIP_SRCID) + "</Meta>";
+		axfDoc += "<Meta name=\"" + PAM_MASTERCLIP_TAPE + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_MASTERCLIP_TAPE) + "</Meta>";
+		axfDoc += "<Meta name=\"" + PAM_SOURCEMOB_OFFSET + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_SOURCEMOB_OFFSET_VALUE) + "</Meta>";
+		axfDoc += "<Meta name=\"" + PAM_SOURCEMOB_OFFSET_TYPE + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_SOURCEMOB_OFFSET_TYPE) + "</Meta>";
+	}
+	
+	// Set some attributes only if its not a subclip
+	if (in_pamAssetType != "subclip")
+	{
+		// Set some attributes only if its not a "real archived sequence"
+		if(!in_handleAsSequence)
+		{
+			axfDoc += "<Meta name=\"" + PAM_MASTERCLIP_MOBID + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_MASTERCLIP_MOBID) + "</Meta>";
+			axfDoc += "<Meta name=\"" + PAM_ARCHIVED_AUDIO_FORMAT + "\" format=\"string\" frate=\"\">" + xmlencode(in_transferAudioFormat) + "</Meta>";
+			axfDoc += "<Meta name=\"" + PAM_ARCHIVED_VIDEO_FORMAT + "\" format=\"string\" frate=\"\">" + xmlencode(in_transferVideoFormat) + "</Meta>";
+			axfDoc += "<Meta name=\"" + PAM_ARCHIVED_AUDIO_TRACK_COUNT + "\" format=\"string\" frate=\"\">" + xmlencode(in_audioTrackCount) + "</Meta>";
+			axfDoc += "<Meta name=\"" + PAM_ORIGINAL_ASSET_MOBID + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_ORIGINAL_ASSET_MOBID) + "</Meta>";
+		}
+		else
+		{
+			axfDoc += "<Meta name=\"" + PAM_SEQUENCE_MOBID + "\" format=\"string\" frate=\"\">" + xmlencode(in_mandatoryMAMAttributes.PAM_ORIGINAL_ASSET_MOBID) + "</Meta>";
+		}
+	}
+	
+	axfDoc += "</MAObject>";
+	axfDoc += "</AXFRoot>";
+
+	// update mandatory attributes
+	retry(RETRYMAX)
+	{
+		_ExceptionMessage = "";
+
+		UpdateDMObject(axfDoc, AccessKey)@DataManagerWS_DMObjectAccess;
+		
+	} while (regex_ismatch(_ExceptionMessage, SRV_UNAVAILABLE_EXCEPTION));
+	
+	if ("" != _ExceptionMessage)
+	{
+		_ErrorNumber = _SWoDLLineNumber;
+		_ErrorMessage = "Error in " + _WorkflowStatus + ": " + _ExceptionMessage;
+		goto ErrorExit;
+	}
+}
+
+//*****************************************************************************
+///Verify DM Attributes exist in object  
+///
+[[Check DMAttributes]]
+
+verifyDMAttributesResult = "";
+sub_VerifyDMAttribute_IN_dmGuid = out_dmGuid;
+
+// Some attributes are only set if its not a subclip
+if (in_pamAssetType != "subclip")
+{
+	// Do not check for "real archived sequences"
+	if(!in_handleAsSequence)
+	{
+		// PAM_MASTERCLIP_MOBID
+		sub_VerifyDMAttribute_IN_attributeName = "PAM_MASTERCLIP_MOBID";
+		sub_VerifyDMAttribute_IN_attributeExpectedValue = in_mandatoryMAMAttributes.PAM_MASTERCLIP_MOBID;
+		gosub VerifyDMAttributeSub;
+		if (sub_VerifyDMAttribute_OUT_result!="")
+		{
+			_ErrorMessage = sub_VerifyDMAttribute_OUT_result;
+			verifyDMAttributesResult = verifyDMAttributesResult + sub_VerifyDMAttribute_OUT_result;
+		}
+		
+		// PAM_ARCHIVED_AUDIO_FORMAT
+		sub_VerifyDMAttribute_IN_attributeName = PAM_ARCHIVED_AUDIO_FORMAT;
+		sub_VerifyDMAttribute_IN_attributeExpectedValue = in_transferAudioFormat;
+		gosub VerifyDMAttributeSub;
+		if (sub_VerifyDMAttribute_OUT_result!="")
+		{
+			_ErrorMessage = sub_VerifyDMAttribute_OUT_result;
+			verifyDMAttributesResult = verifyDMAttributesResult + sub_VerifyDMAttribute_OUT_result;
+		}
+		
+		// PAM_ARCHIVED_VIDEO_FORMAT
+		sub_VerifyDMAttribute_IN_attributeName = PAM_ARCHIVED_VIDEO_FORMAT;
+		sub_VerifyDMAttribute_IN_attributeExpectedValue = in_transferVideoFormat;
+		gosub VerifyDMAttributeSub;
+		if (sub_VerifyDMAttribute_OUT_result!="")
+		{
+			_ErrorMessage = sub_VerifyDMAttribute_OUT_result;
+			verifyDMAttributesResult = verifyDMAttributesResult + sub_VerifyDMAttribute_OUT_result;
+		}
+		
+		// PAM_ORIGINAL_ASSET_MOBID
+		sub_VerifyDMAttribute_IN_attributeName = "PAM_ORIGINAL_ASSET_MOBID";
+		sub_VerifyDMAttribute_IN_attributeExpectedValue = in_mandatoryMAMAttributes.PAM_ORIGINAL_ASSET_MOBID;
+		gosub VerifyDMAttributeSub;
+		if (sub_VerifyDMAttribute_OUT_result!="")
+		{
+			_ErrorMessage = sub_VerifyDMAttribute_OUT_result;
+			verifyDMAttributesResult = verifyDMAttributesResult + sub_VerifyDMAttribute_OUT_result;
+		}
+	}
+	else
+	{
+		// PAM_ORIGINAL_ASSET_MOBID
+		sub_VerifyDMAttribute_IN_attributeName = PAM_SEQUENCE_MOBID;
+		sub_VerifyDMAttribute_IN_attributeExpectedValue = in_mandatoryMAMAttributes.PAM_ORIGINAL_ASSET_MOBID;
+		gosub VerifyDMAttributeSub;
+		if (sub_VerifyDMAttribute_OUT_result!="")
+		{
+			_ErrorMessage = sub_VerifyDMAttribute_OUT_result;
+			verifyDMAttributesResult = verifyDMAttributesResult + sub_VerifyDMAttribute_OUT_result;
+		}
+	}
+}
+
+// Do not check for "real archived sequences"
+if(!in_handleAsSequence)
+{
+	// PAM_MASTERCLIP_SRCID
+	sub_VerifyDMAttribute_IN_attributeName = "PAM_MASTERCLIP_SRCID";
+	sub_VerifyDMAttribute_IN_attributeExpectedValue = in_mandatoryMAMAttributes.PAM_MASTERCLIP_SRCID;
+	gosub VerifyDMAttributeSub;
+	if (sub_VerifyDMAttribute_OUT_result!="")
+	{
+		_ErrorMessage = sub_VerifyDMAttribute_OUT_result;
+		verifyDMAttributesResult = verifyDMAttributesResult + sub_VerifyDMAttribute_OUT_result;
+	}
+	
+	// PAM_MASTERCLIP_TAPE
+	sub_VerifyDMAttribute_IN_attributeName = "PAM_MASTERCLIP_TAPE";
+	sub_VerifyDMAttribute_IN_attributeExpectedValue = in_mandatoryMAMAttributes.PAM_MASTERCLIP_TAPE;
+	gosub VerifyDMAttributeSub;
+	if (sub_VerifyDMAttribute_OUT_result!="")
+	{
+		_ErrorMessage = sub_VerifyDMAttribute_OUT_result;
+		verifyDMAttributesResult = verifyDMAttributesResult + sub_VerifyDMAttribute_OUT_result;
+	}
+	
+	// PAM_SOURCEMOB_OFFSET_VALUE
+	sub_VerifyDMAttribute_IN_attributeName = "PAM_SOURCEMOB_OFFSET";
+	sub_VerifyDMAttribute_IN_attributeExpectedValue = in_mandatoryMAMAttributes.PAM_SOURCEMOB_OFFSET_VALUE;
+	gosub VerifyDMAttributeSub;
+	if (sub_VerifyDMAttribute_OUT_result!="")
+	{
+		_ErrorMessage = sub_VerifyDMAttribute_OUT_result;
+		verifyDMAttributesResult = verifyDMAttributesResult + sub_VerifyDMAttribute_OUT_result;
+	}
+	
+	// PAM_SOURCEMOB_OFFSET_TYPE
+	sub_VerifyDMAttribute_IN_attributeName = "PAM_SOURCEMOB_OFFSET_TYPE";
+	sub_VerifyDMAttribute_IN_attributeExpectedValue = in_mandatoryMAMAttributes.PAM_SOURCEMOB_OFFSET_TYPE;
+	gosub VerifyDMAttributeSub;
+	if (sub_VerifyDMAttribute_OUT_result!="")
+	{
+		_ErrorMessage = sub_VerifyDMAttribute_OUT_result;
+		verifyDMAttributesResult = verifyDMAttributesResult + sub_VerifyDMAttribute_OUT_result;
+	}
+}
+
+if (verifyDMAttributesResult!="")
+{
+		_ErrorMessage = verifyDMAttributesResult;
+		_ErrorNumber = _SWoDLLineNumber;
+		goto ErrorExit;
+}
+
+gosub UpdateWFSuccessStatusSub;
+
+//#endif CREATE_DMOBJECT_SUBWF
+//#ifdef IGNORE
+
+
+
+//*****************************************************************************
+/// Attach object to process
+///
+[[Attach object to process]]
+
+var prependObjectToProcessInfo = 
+"<AXFRoot>"
+	+"<MAObject type=\"default\" mdclass=\"\">"
+		+"<GUID dmname=\"\">" + _ProcessID + "</GUID>"
+	+"</MAObject>"
+	+"<MVAttribute type=\"P_OBJECT_LIST\" index=\"0\" attribute=\"P_OBJECT_LIST\" mdclass=\"\" "
+			+" objectid=\"" + _ProcessID + "\">"
+		+"<Meta name=\"DMGUID_ID\" format=\"string\" frate=\"\" >" + out_dmGuid + "</Meta>"
+		+"<Meta name=\"MAINTITLE\" format=\"string\" frate=\"\" >" + xmlencode(in_pamAssetName) + "</Meta>"
+	+"</MVAttribute>"
++"</AXFRoot>";
+
+
+retry(RETRYMAX)
+{
+	_ExceptionMessage = "";
+	
+	MultiValuePrepend(prependObjectToProcessInfo, AccessKey)@DataManagerWS_DMObjectAccess;
+	
+} while (regex_ismatch(_ExceptionMessage, SRV_UNAVAILABLE_EXCEPTION));
+
+if ("" != _ExceptionMessage)
+{
+	_ErrorNumber = _SWoDLLineNumber;
+	_ErrorMessage = "Could not attach object to process.\n";
+	goto ErrorExit;
+}
+
+gosub UpdateWFSuccessStatusSub;
+
+///////////////////////////////////////////////////////////////////////////////////////////
+SuccessExit:
+
+gosub UpdateWFSuccessStatusSub; 
+
+taskProgress = TASK_PROGRESS_FINISHED; 
+taskState = TASK_STATE_FINISHED;
+taskLifecycle = TASK_LIFECYCLE_FINISHED; 
+gosub SetProcessArgs;
+gosub UpdateTaskState; 
+
+[[Finished]]
+exit; 
+
+///////////////////////////////////////////////////////////////////////////////////////////
+ErrorExit:
+
+gosub UpdateWFErrorStatusSub;  
+taskProgress = TASK_PROGRESS_ERROR;
+taskState = TASK_STATE_ERROR; 
+taskLifecycle = TASK_LIFECYCLE_ERROR;
+gosub SetProcessArgs; 
+gosub UpdateTaskState; 
+     
+[[Error]]
+out_errorMessage = _ErrorMessage;
+// End with error 
+error _ErrorMessage;
+
+
+// ---------------------------- this is the end ----------------------------
+//
+//#endif IGNORE  
+//#ifdef PAMADAPTERMETASUBS
+////////////////////////////////////////////////////////////////////////////////////
+GetAttributeSub:
+
+// IN parameters:
+	var sub_GetAttribute_IN_assetUri;
+	var sub_GetAttribute_IN_attributeName;
+	var sub_GetAttribute_IN_attributeGroup;
+
+// OUT parameters:
+	var sub_GetAttribute_OUT_attributeValue = "";
+	var sub_GetAttribute_OUT_success = FALSE;
+	var sub_GetAttribute_OUT_error = "";
+
+	/*
+	http://IPWS:PORT/docs/Interplay_WS_Reference_Guide.html	
+	Default Set of Attributes for Avid Assets
+
+	SYSTEM: CFPS, Created By, Creation Date, Duration, End, Media File Format, Media Size,
+	Media Status, MOB ID, Modified By, Modified Date, Moniker, Path, Start, Source ID, Tape, Tracks, Type, Version
+	Comment
+
+	USER: Comments, Display Name, Video ID and any other custom USER attributes in the system
+	Default Set of Attributes for Non-Avid Assets
+
+	SYSTEM: Created By, Creation Date, File Size, Modified By, Modification Date, Moniker, Path, Type, Version Comment	
+	*/
+
+	success = FALSE;
+	retry(RETRYMAX)
+	{
+		sub_GetAttribute_OUT_attributeValue = GetAttribute(AccessKey, sub_GetAttribute_IN_assetUri, sub_GetAttribute_IN_attributeGroup, sub_GetAttribute_IN_attributeName)@PAMAdapterAsset;
+		success = TRUE;
+	} while ( !success && ! regex_ismatch(_ExceptionMessage, PAMADAPTER_OBJECT_NOT_FOUND_ERROR) /*clip not exists*/);	
+	if ( !success )
+	{
+		sub_GetAttribute_OUT_error = "Cannot get Attribute '" + sub_GetAttribute_IN_attributeName + "' from sub_GetAttribute_IN_assetUri \"" + sub_GetAttribute_IN_assetUri +  "\". Reason: " + _ExceptionMessage + " [SWoDL line " + _SWoDLLineNumber + "]";
+		sub_GetAttribute_OUT_success = FALSE;
+		return;
+	}
+
+	sub_GetAttribute_OUT_success = TRUE;
+
+	// clear the old values, may not be overriden at next sub call 
+	sub_GetAttribute_IN_attributeName = "";
+	sub_GetAttribute_IN_attributeGroup = "";
+	
+	return;
+		
+//#endif PAMADAPTERMETASUBS
+
+//#ifdef DMSUBS		
+////////////////////////////////////////////////////////////////////////////////////
+VerifyDMAttributeSub:
+
+// IN parameters:
+// sub_VerifyDMAttribute_IN_dmGuid
+// sub_VerifyDMAttribute_IN_attributeName
+// sub_VerifyDMAttribute_IN_attributeExpectedValue
+
+// OUT parameters:
+	sub_VerifyDMAttribute_OUT_result = "";
+
+// INTERNAL variables:
+	var sub_VerifyDMAttribute_INTERNAL_exceptionReason = "";
+	var sub_VerifyDMAttribute_INTERNAL_attributeActualValue = "";
+
+	success = FALSE;
+	retry(RETRYMAX)
+	{
+		try 
+		{
+			sub_VerifyDMAttribute_INTERNAL_attributeActualValue = 
+				GetDMAttribute (sub_VerifyDMAttribute_IN_dmGuid, sub_VerifyDMAttribute_IN_attributeName, UserAccessKey) @ DataManagerWS_DMObjectAccess;				
+			if (sub_VerifyDMAttribute_IN_attributeExpectedValue != sub_VerifyDMAttribute_INTERNAL_attributeActualValue)
+				sub_VerifyDMAttribute_OUT_result = "Attribute " + sub_VerifyDMAttribute_IN_attributeName + " not written correctly.\n";										
+			success = TRUE;				
+		} 
+		catch 
+		{				
+			if ( (int)find( _ExceptionReason, "UnknownObject") != -1)
+			{
+				sub_VerifyDMAttribute_INTERNAL_exceptionReason = UNKNOWN_OBJECT;
+			}
+			else if ( (int)find( _ExceptionReason, "UnknownAttribute") != -1)
+			{
+				sub_VerifyDMAttribute_INTERNAL_exceptionReason = UNKNOWN_ATTRIBUTE;
+			}
+			else if ( (int)find( _ExceptionReason, "CBAAccessDenied") != -1)
+			{
+				sub_VerifyDMAttribute_INTERNAL_exceptionReason = CBA_ACCESS_DENIED;
+			}
+			else
+			{
+				throw _ErrorMessage;	// retry
+			}										
+		}		
+	} while(success != TRUE && sub_VerifyDMAttribute_INTERNAL_exceptionReason == "");
+	
+	if(success != TRUE)
+	{
+		sub_VerifyDMAttribute_OUT_result = "Error while verifying attribute "+ sub_VerifyDMAttribute_IN_attributeName +" of object "
+			+sub_VerifyDMAttribute_IN_dmGuid +".\n";
+			
+		if (sub_VerifyDMAttribute_INTERNAL_exceptionReason == UNKNOWN_OBJECT)
+		{
+			sub_VerifyDMAttribute_OUT_result = sub_VerifyDMAttribute_OUT_result + 
+				"Unknown Object " + sub_VerifyDMAttribute_IN_dmGuid + ". Write to DM failed.\n";
+		}
+		else if (sub_VerifyDMAttribute_INTERNAL_exceptionReason == UNKNOWN_ATTRIBUTE)
+		{
+			sub_VerifyDMAttribute_OUT_result = sub_VerifyDMAttribute_OUT_result + 
+				"Unknown Attribute " + sub_VerifyDMAttribute_IN_attributeName
+				+ " for object with DMGUID " + sub_VerifyDMAttribute_IN_dmGuid +". Please check your data model!\n";			
+		}
+		else if (sub_VerifyDMAttribute_INTERNAL_exceptionReason == CBA_ACCESS_DENIED)
+		{
+			sub_VerifyDMAttribute_OUT_result = sub_VerifyDMAttribute_OUT_result + 
+				"Access Denied for object " + sub_VerifyDMAttribute_IN_dmGuid + ".\n";
+		}
+		else
+		{
+			sub_VerifyDMAttribute_OUT_result = sub_VerifyDMAttribute_OUT_result + 
+				"Unknown Error "+ _WorkflowStatus + ": " + _ExceptionMessage;
+		}
+		_ErrorNumber = _SWoDLLineNumber;		
+	}
+
+
+	success = TRUE;
+	return;
+//#endif DMSUBS
+//#ifdef WFSUBS	
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Update  workflow progress and status 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////
+UpdateWFSuccessStatusSub:
+    workflowStatus = _WorkflowStatus;
+
+    workflowStatus = replace(workflowStatus, "*** limited *** ", "");
+    workflowStatus += "\n";
+    workflowStatus = substr(workflowStatus , 0, find(workflowStatus, "\n"));
+    __History += "[[" + workflowStatus + "]] (" + (string)((int)_RunTime - (int)timestamp) + " ms): ok \n";
+    timestamp = _RunTime;
+
+    return;
+
+////////////////////////////////////////////////////////////////////////////////////////////
+UpdateWFSkippedStatusSub:
+    workflowStatus = _WorkflowStatus;
+
+    workflowStatus = replace(workflowStatus, "*** limited *** ", "");
+    workflowStatus += "\n";
+    workflowStatus = substr(workflowStatus , 0, find(workflowStatus, "\n"));
+    __History += "[[" + workflowStatus + "]] (" + (string)((int)_RunTime - (int)timestamp) + " ms): skipped\n";
+    timestamp = _RunTime;
+
+	return;
+
+////////////////////////////////////////////////////////////////////////////////////////////
+UpdateWFErrorStatusSub:
+    workflowStatus = _WorkflowStatus;
+
+    workflowStatus = replace(workflowStatus, "*** limited *** ", "");    
+    workflowStatus += "\n";
+    workflowStatus = substr(workflowStatus , 0, find(workflowStatus, "\n"));   
+    var errorLine = "\n[[" + workflowStatus + "]] (" + (string)((int)_RunTime - (int)timestamp) + " ms): Error: " + _ErrorMessage + " \n\n";
+    if (0 != _ErrorNumber) 
+    {
+        errorLine += " [around SWoDL line: " + _ErrorNumber + "]\n";
+    }         
+    __History += errorLine;    
+    __ErrorHistory += errorLine; 
+    timestamp = _RunTime;
+	
+    return;
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////
+UpdateWFWarningStatusForStepSub: // similar to UpdateWFWarningStatusSub, but increase workflowStep by one, called at end of each [[block]]
+    workflowStatus = _WorkflowStatus;
+	
+    workflowStatus = replace(workflowStatus, "*** limited *** ", "");
+    workflowStatus += "\n";
+    workflowStatus = substr(workflowStatus , 0, find(workflowStatus, "\n"));
+    __History += "[[" + workflowStatus + "]] (" + (string)((int)_RunTime - (int)timestamp) + " ms): "
+        + _ErrorMessage + " [around SWoDL line: " + _ErrorNumber + "]\n";
+    timestamp = _RunTime;
+    _ErrorNumber = 0;	// reset 
+    workflowHasWarnings = true;	
+	
+    return;		
+
+////////////////////////////////////////////////////////////////////////////////////////////
+UpdateWFInfoStatusSub: // display _ErrorMessage, this routine differs from UpdateWFInfoStatusSub of archive wf 
+    workflowStatus = _WorkflowStatus;
+	
+	workflowStatus = replace(workflowStatus, "*** limited *** ", "");
+	workflowStatus += "\n";
+	workflowStatus = substr(workflowStatus , 0, find(workflowStatus, "\n"));
+	__History += "[[" + workflowStatus + "]] : " + _ErrorMessage + " [around SWoDL line: " + _ErrorNumber + "]\n";
+	
+	return;    	
+	
+////////////////////////////////////////////////////////////////////////////////////////////
+UpdateWFWarningStatusSub: // display _ErrorMessage, set workflowHasWarnings flag, this routine differs from UpdateWFWarningStatusSub of archive wf
+    workflowStatus = _WorkflowStatus;
+	
+	workflowStatus = replace(workflowStatus, "*** limited *** ", "");
+	workflowStatus += "\n";
+	workflowStatus = substr(workflowStatus , 0, find(workflowStatus, "\n"));
+	__History += "[[" + workflowStatus + "]] : " + _ErrorMessage + " [around SWoDL line: " + _ErrorNumber + "]\n";
+	_ErrorNumber = 0;	// reset 
+	workflowHasWarnings = true;
+	
+	return;  
+	
+//#endif WFSUBS
+//#ifdef IGNORE
+UpdateTaskState: 
+	success = "false";  
+	retry(RETRYMAX) 
+	{ 
+		UpdateTask(_ProcessID, _JobID, taskState, taskProgress, taskLifecycle, AccessKey); 
+		if("" != in_progressOnSuccess && taskLifecycle == TASK_LIFECYCLE_FINISHED)
+		{
+			UpdateDMAttribute(_ProcessID, PROCESS_PROGRESS_ATTRIBUTE, in_progressOnSuccess, AccessKey)@DataManagerWS_DMObjectAccess;
+		}
+		
+		success = "true"; 
+	} while ("true" != success); 
+	
+	if ("true" != success) 
+	{ 
+		_ErrorNumber = _SWoDLLineNumber; 
+		_ErrorMessage = "Couldn't update Task \"" + _JobID + "\" in Process \""+_ProcessID+"\"."; 
+		goto UpdateWFErrorStatusSub; 
+	} 
+return;
+
+//**************************************************************************************
+/// Set processArgs
+[[Set processArgs]]
+
+SetProcessArgs:
+
+processArgs.dmGuid = out_dmGuid;
+
+out_mandatoryMAMAttributes = in_mandatoryMAMAttributes;
+processArgs.mandatoryMAMAttributes = out_mandatoryMAMAttributes;
+
+
+return;
+
+//**************************************************************************************
+/// Identify Object
+IdentifyObject:
+[[Identify Object]]
+	//in parameters
+	var identify_in_pamUri;
+	//out parameters
+	var identify_out_dmGuid; //this indicates whether an object was found. If not the script will create new object
+	
+	//Here a custom implementation can be made
+	//You can also set the attribute DO_VIDEO_IMPORT to 1 or 0 to skip the start of the MAM_IMPORT_VIDEO process
+	//This can be useful if you want to update metadata only.
+	//Note: The MAM_IMPORT_VIDEO process fails when the object already has a MAIN essence package with essences.
+	//      So in case you found an object and want to import the video you should make sure to either move the
+	//		contents of the MAIN essence package to a back up essence package or deleted them.
+
+return;
+//#endif IGNORE
+
+
+
+
+
+
+
+
+
+
